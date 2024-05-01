@@ -10,7 +10,7 @@ function Questions() {
         className="animated-button mt-4 mb-5 mt-3 text-black cs-btn jump-animation"
         onClick={() => navigate("/questionnaire")}
       >
-        <span>Click to be apply</span>
+        <span> CLICK ME TO APPLY</span>
         <span></span>
       </button>
     </div>
