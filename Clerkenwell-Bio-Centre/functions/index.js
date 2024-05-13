@@ -6,22 +6,26 @@ const EmailTemplate = require("./EmailTemplate");
 const nodemailer = require("nodemailer");
 const admin = require("firebase-admin");
 const ClientTemplate = require("./ClientTemplate");
+const ConfirmTemplate = require("./ConfirmTemplate");
+
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
 dotenv.config();
 admin.initializeApp();
-
+// console.log(process.env);
 const app = express();
 app.use(cors);
 app.use(express.static("public"));
 app.use(express.urlencoded({ extended: true }));
 
-app.get("/", (request, response) => {
+app.get("/test", (request, response) => {
   return response.status(200).json({ msg: "hello World" });
 });
 
 app.post("/send-email", async (req, res) => {
   try {
-    const { userName, conditionsValues, trialOptionsValues, email } = req.body;
+    const { userName, conditionsValues, trialOptionsValues, email, phone } =
+      req.body;
 
     const transporter = nodemailer.createTransport({
       host: "smtp.gmail.com",
@@ -43,7 +47,8 @@ app.post("/send-email", async (req, res) => {
         userName,
         conditionsValues,
         trialOptionsValues,
-        email
+        email,
+        phone
       ), // html body
     });
     res.status(200).json({
@@ -131,6 +136,98 @@ app.post("/validate-code", async (req, res) => {
     console.error("Error:", error);
     // Send an error response
     res.status(500).send("Internal Server Error");
+  }
+});
+
+app.post("/confirm-booking", async (req, res) => {
+  try {
+    const { id } = req.body;
+
+    // Update the user object and add a status property
+    await admin.firestore().collection("users").doc(id).update({
+      status: "done",
+    });
+
+    // Fetch user data from Firestore
+    const userSnapshot = await admin
+      .firestore()
+      .collection("users")
+      .doc(id)
+      .get();
+    const userData = userSnapshot.data();
+
+    const transporter = nodemailer.createTransport({
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
+      auth: {
+        user: process.env.NODE_MAILER_EMAIL,
+        pass: process.env.NODE_MAILER_PASSWORD,
+      },
+    });
+    let info = await transporter.sendMail({
+      from: '"Clerkenwell Bio Centre" <angela@clerkenwell-bio-botanics.co.uk>', // sender address
+      to: "angela@clerkenwell-bio-botanics.co.uk",
+      subject: "Your Ticket Booking Details", // Subject line
+      text: "Greetings! Congratulations, you have successfully reserved your spot.", // plain text body
+      html: ConfirmTemplate(userData.selectedSlot, userData.email, id), // html body
+    });
+    // Send a success response
+    res.status(200).json({ message: "Booking confirmed successfully" });
+  } catch (error) {
+    console.error("Error:", error);
+    // Send an error response
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+app.post("/create-checkout-session", async (req, res) => {
+  const { items, userData } = req.body;
+  // console.log(req.body);
+  try {
+    const session = await stripe.checkout.sessions.create({
+      line_items: items,
+      mode: "payment",
+      success_url: `https://vegetables-e38f2.web.app/payments?userId=${userData.id}&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `https://vegetables-e38f2.web.app/payments?userId=${userData.id}`,
+    });
+    //   success_url: `http://localhost:5173/payments?userId=${userData.id}&session_id={CHECKOUT_SESSION_ID}`,
+    //   cancel_url: `http://localhost:5173/payments?userId=${userData.id}`,
+    // });
+
+    res.send(JSON.stringify({ sessionId: session.id }));
+  } catch (error) {
+    console.log(error);
+    res.status(400).json({ error: "Could not process stripe payment" });
+  }
+});
+
+app.post("/verify-payment", async (req, res) => {
+  const { sessionId, userId } = req.body;
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    // console.log(session);
+    const paymentDetails = {
+      amount: session.amount_total,
+      currency: session.currency,
+      sessionId: session.id,
+      paymentStatus: session.payment_status === "paid",
+      userId, // Assuming you pass userId in the query string
+      // Add more payment details as needed
+    };
+
+    const docRef = await admin
+      .firestore()
+      .collection("payments")
+      .add(paymentDetails);
+
+    paymentDetails.paymentId = docRef.id;
+
+    res.json(paymentDetails);
+  } catch (error) {
+    console.error("Error fetching payment details:", error);
+    res.status(500).json({ error: "Error fetching payment details" });
   }
 });
 
