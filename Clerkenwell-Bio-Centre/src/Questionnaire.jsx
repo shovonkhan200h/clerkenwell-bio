@@ -81,7 +81,7 @@ const RenderQuestion = ({
     case 3:
       return (
         <div>
-          <p className="text-white ft">
+          <p className="text-black ft">
             Please choose all trials you would be able to attend.
           </p>
           <Select
